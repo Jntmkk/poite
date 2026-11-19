@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 仅 debug：允许本地 HTTP 联调（adb reverse 到 Mac 上的 mock 服务） -->
+    <application android:usesCleartextTraffic="true" />
+</manifest>

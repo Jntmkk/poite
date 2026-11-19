@@ -1,0 +1,276 @@
+---
+name: kmp-compose-multiplatform
+description: poite 项目的 KMP + Compose Multiplatform 开发规范——UI 与逻辑全共享（commonMain 写 Compose UI，Android/iOS 各为薄壳）。创建、修改或评审 shared 模块（commonMain/androidMain/iosMain）、androidApp 或 iosApp 代码时使用。
+---
+
+# poite — KMP + Compose Multiplatform 全共享
+
+本项目 UI 和逻辑都共享：`commonMain` 里的 Compose UI 同时跑在 Android 和 iOS 上，androidApp / iosApp 只是薄壳。已定案，不要再建议「原生 UI 更贴合平台」之类的替代架构。
+
+改编自 [felipechaux/kmp-compose-multiplatform-skill](https://github.com/felipechaux/kmp-compose-multiplatform-skill)（MIT），按本项目实际配置与实测踩坑重写。
+
+## 项目事实（以此为准，不要臆测）
+
+- 包名：`net.coolshell.poite`（shared 模块 `net.coolshell.poite.shared`，framework 模块名 `shared`）
+- 模块：`:shared`（KMP library，**含全部 UI 与逻辑**）、`:androidApp`（薄壳，仅 `setContent { App() }`）、`iosApp/`（手写维护的 Xcode 工程，SwiftUI 壳通过 `UIViewControllerRepresentable` 嵌入 `MainViewControllerKt.MainViewController()`）
+- 版本：Kotlin 2.4.21 · CMP 1.11.1 · AGP 8.10.0 · Gradle 8.13 · compileSdk 36 / minSdk 24（**别升 CMP 1.12+**：其 androidx.compose 1.12 依赖要求 compileSdk 37，本机 SDK 只装到 android-36.1）
+- 所有依赖版本集中在 `gradle/libs.versions.toml`，**禁止在 build 文件里硬编码版本号**
+- shared 目标：`androidTarget` + `iosX64/iosArm64/iosSimulatorArm64`，静态 framework（`baseName = "shared"`, `isStatic = true`）
+- compose resources：`compose.resources { packageOfResClass = "net.coolshell.poite.shared.generated.resources"; generateResClass = always }`，资源放 `shared/src/commonMain/composeResources/`
+- iOS 集成：Xcode Run Script 调 `./gradlew :shared:embedAndSignAppleFrameworkForXcode`；签名 Team `YY4YZVH2S9`（个人证书，7 天过期需重装）
+- 本机 Xcode 是 27.x：**没有独立 Simulator.app**，模拟器窗口用 Device Hub（`Contents/Applications/DeviceHub.app`，File → New Window 开设备窗口）
+- kotlinx-datetime 已升 0.7.1（CMP material3 传递依赖会强制升级）：`Clock` 改用 `kotlin.time.Clock`，旧的 `kotlinx.datetime.Clock` 在 iOS 编译直接挂
+
+常用命令：
+
+```bash
+./gradlew :androidApp:installDebug          # Android 真机/模拟器
+./gradlew :shared:testDebugUnitTest         # 共享单测
+./gradlew :shared:compileKotlinIosSimulatorArm64   # 快速验证 iOS 编译
+# PostHog/其他 SwiftPM 依赖变更后重跑一次（会改 pbxproj，生成物要提交）：
+XCODEPROJ_PATH="$PWD/iosApp/iosApp.xcodeproj" ./gradlew :shared:integrateLinkagePackage
+# iOS 完整构建：xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -configuration Debug \
+#   -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO build
+# 或直接 Xcode 打开 iosApp.xcodeproj ⌘R；不要手动跑 embedAndSign（它需要 Xcode 环境变量）
+```
+
+## 核心原则
+
+1. **最大化共享**——UI、ViewModel、逻辑、数据全在 `commonMain`；平台差异走 expect/actual
+2. **Clean Architecture**：Data → Domain → Presentation，按 feature 分包
+3. **单向数据流**：`StateFlow<UiState>` 下行，事件经回调/SharedFlow 上行
+4. **接口优先**：domain 定义接口，data 实现，DI 注入
+5. **平台对等**：两端像素级一致是默认行为；平台专属样式必须显式声明理由
+
+## shared 模块结构
+
+```
+shared/src/
+├── commonMain/kotlin/net/coolshell/poite/shared/
+│   └── feature/<name>/
+│       ├── data/        # local(Room DAO/Entity)、remote(Ktor)、repository 实现、mapper
+│       ├── domain/      # model（纯 Kotlin）、repository 接口、usecase（operator fun invoke）
+│       ├── presentation/
+│       │   ├── ui/        # Composable 页面与组件
+│       │   ├── viewmodel/ # 共享 ViewModel
+│       │   └── state/     # UiState data class
+│       └── di/          # 该 feature 的 Koin module
+│   ├── core/            # 横向基础设施（见下「已就位的基础设施」）
+│   │   ├── logging/     # AppLogger 接口 + Kermit 实现
+│   │   ├── cache/       # KvStore（Settings）+ MemoryCache（cache4k）
+│   │   ├── tracking/    # Tracker 接口 + PostHog 实现（已接入）
+│   │   └── crash/       # CrashReporter 接口 + Sentry 实现（已接入）
+│   └── App.kt           # 根 Composable
+├── androidMain/         # Android actual（Context、OkHttp、Timber…）
+├── iosMain/             # iOS actual（Darwin、os_log…）+ MainViewController()
+└── commonTest/          # 共享单测（kotlin.test + runTest）
+```
+
+## Presentation 层范式
+
+```kotlin
+class HomeViewModel(private val getItems: GetItemsUseCase) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    private val _uiState = MutableStateFlow(HomeUiState())
+    val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+    // 一次性事件（导航/Toast）——绝不放进 UiState，replay 必须为 0
+    private val _events = MutableSharedFlow<HomeEvent>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    val events: SharedFlow<HomeEvent> = _events.asSharedFlow()
+
+    fun loadItems() {
+        scope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            when (val r = getItems()) {
+                is Resource.Success -> _uiState.update { it.copy(isLoading = false, items = r.data) }
+                is Resource.Error -> _uiState.update { it.copy(isLoading = false, errorMessage = r.error.toUserMessage()) }
+            }
+        }
+    }
+
+    fun onCleared() = scope.cancel()
+}
+
+data class HomeUiState(
+    val isLoading: Boolean = false,
+    val items: List<Item> = emptyList(),
+    val errorMessage: String? = null,   // 人类可读，绝不放 AppError
+)
+```
+
+Composable 页面：用 `collectAsStateWithLifecycle()`（`androidx.lifecycle:lifecycle-runtime-compose` KMP 版）收集状态；一次性事件在 `LaunchedEffect(Unit)` 里 collect。嵌套 Composable 只接收 state + 回调，不直接碰 ViewModel。
+
+异步结果统一：
+
+```kotlin
+sealed class Resource<out T> {
+    data class Success<out T>(val data: T) : Resource<T>()
+    data class Error(val error: AppError) : Resource<Nothing>()
+}
+```
+
+## 平台壳的写法（已就位，改动时照此核对）
+
+**Android**（androidApp/MainActivity.kt）：`setContent { App() }`，无需其他 compose 依赖（activity-compose 即可）。
+
+**iOS**：
+
+```kotlin
+// shared/iosMain/MainViewController.kt
+fun MainViewController(): UIViewController = ComposeUIViewController { App() }
+```
+
+```swift
+// iosApp/ContentView.swift
+struct ComposeView: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIViewController {
+        MainViewControllerKt.MainViewController()
+    }
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+}
+struct ContentView: View {
+    var body: some View { ComposeView().ignoresSafeArea() }
+}
+```
+
+## iOS 图标与启动屏（已就位）
+
+- **图标**：`Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`，单张 1024 全出血方形（系统自己切圆角，不要预切/加透明）。Contents.json 只需 universal + 1024x1024 一条。显示名用 Info.plist 的 `CFBundleDisplayName = poite`（否则显示默认 PRODUCT_NAME）
+- **启动屏**：Info.plist `UILaunchScreen` 里 `UIImageName = LaunchLogo`（白底居中 K 标，资源在 `LaunchLogo.imageset`，1x/2x/3x = 160/320/480px）。系统静态启动屏，App 首帧就绪后自动切主页面，不需要代码控制；想换海报就换这个 imageset
+- 图标/启动屏图用 Python PIL 按 `compose-multiplatform.xml` 的矢量坐标生成（深色 #041619、橙 #f98e25），脚本思路：4x 超采样 + LANCZOS 缩放
+
+## iOS Info.plist 强制项（少了就崩/黑边，实测踩过）
+
+1. **`CADisableMinimumFrameDurationOnPhone = true`**——CMP ≥1.7 启动时 `PlistSanityCheck` 校验，缺失直接 SIGABRT 闪退（ProMotion 帧率支持）
+2. **`UILaunchScreen`（至少空 dict）**——Xcode 27 / iOS 26 起老的 `UILaunchScreen_Generation` 失效，缺有效启动屏配置的 App 会被塞进带圆角黑边的兼容画框（上下黑条、内容不铺满）
+
+## iOS 互操作（平台 API 仍需要）
+
+UI 共享后互操作面缩小，但 expect/actual 和平台能力调用仍在：
+
+- 顶层函数在 Swift 侧带 `Kt` 后缀（`NewYearKt.daysPhrase()`）；`object` → `.shared`；`Unit` → `KotlinUnit`（避免在公开 API 返回）
+- **Kotlin 默认参数不会桥接到 Swift**——Swift 调用侧必须传全部参数。给 Swift 的入口函数在 iosMain 包一层无参包装（如 `IosKoinKt.initKoinIos()`），不要让 Swift 直接调带默认参数的 common 函数
+- multiplatform-settings 1.3.0 起一批改名：`AndroidSettings`→`SharedPreferencesSettings`、iOS 工厂 `Settings()`→`NSUserDefaultsSettings(...)`、测试的 `MockSettings`→`MapSettings`；网上老教程的写法都会编译不过
+- suspend/Flow 给 Swift 用：SKIE（推荐，`co.touchlab.skie`）或 iosMain 手写回调包装；Swift 侧回调用 `[weak self]`，deinit 里取消观察
+- 公开 API 避免泛型（SKIE 对泛型 sealed class 无法穷举化）；内部类型标 `@HiddenFromObjC`
+- 热路径减少 Kotlin↔Swift 跨边界调用（批量取数据）
+- Kotlin/Native 新内存模型：跨线程共享可变状态自行同步；UI 更新回 `Dispatchers.Main`
+- 改了 framework 名或模块名，四处同步改：Xcode Run Script、`FRAMEWORK_SEARCH_PATHS`、`OTHER_LDFLAGS -framework shared`、`gradle.properties` 的 `xcodeproj=./iosApp`
+
+## 边到边与 insets
+
+- Android targetSdk 36 强制 edge-to-edge：根布局必须消费 insets。共享 UI 里用 `Modifier.safeContentPadding()`（状态栏+导航栏+挖孔+IME 并集），已在 `App()` 根部应用
+- iOS 侧 `ComposeView().ignoresSafeArea()` + Compose 内部的 safeContentPadding 配合，不需要额外处理
+
+## 资源与 i18n（compose resources）
+
+- 字符串：`commonMain/composeResources/values/strings.xml`，代码里 `stringResource(Res.string.xxx)`；复数用 `pluralStringResource()`，禁止 `if (count == 1)` 分支
+- 图片：`composeResources/drawable/xxx.xml`（Android vector 格式），`painterResource(Res.drawable.xxx)`
+- RTL：padding 用 `start/end`，方向图标用 `Icons.AutoMirrored.*`
+
+## 依赖注入（Koin，已就位）
+
+依赖：`koin-core` + `koin-android`(androidMain) + `koin-compose`(commonMain，Composable 里 `koinInject<T>()`)。
+
+入口已接好：Android 在 `PoiteApp.onCreate()` 里先 `initPostHog(this)` 再 `initKoin { androidContext(this@PoiteApp) }`；iOS 在 `iOSApp.swift` 的 `init()` 里 `IosKoinKt.startKoinIos()`（内含 PostHog 初始化）。`platformModule()` 是 expect/actual，放平台绑定（Android 的 Settings 需要 Context）。
+
+**Kotlin 2.4 坑：给 Swift 的函数名不要以 `init` 开头**——K/N 为避免 ObjC initializer 冲突会改名加 `do` 前缀（`initKoinIos` → `doInitKoinIos()`），导致 Swift 侧旧调用编译失败。
+
+新增 feature 时：
+
+```kotlin
+val homeModule = module {
+    single<HomeRepository> { HomeRepositoryImpl(get(), get()) }
+    factory { GetHomeDataUseCase(get()) }
+    factory { HomeViewModel(get()) }
+}
+// 在 KoinInit.kt 的 modules(...) 里追加 homeModule
+```
+
+同类多实例用 `named()`；生产代码禁止 `stopKoin()`。
+
+## 已就位的基础设施（core/）
+
+- **AppLogger**（`core/logging`）：业务代码只依赖接口；实现是 Kermit（`KermitAppLogger`，platformLogWriter 自动接 logcat/os_log）。**不要**再手写 expect/actual 日志函数
+- **KvStore**（`core/cache`）：multiplatform-settings 后端，Android 用 SharedPreferences、iOS 用 NSUserDefaults。只放配置/标志位
+- **MemoryCache**（`core/cache`）：cache4k，进程内 10 分钟 TTL。接口响应等短生命周期对象
+- **Tracker**（`core/tracking`）：**已接 PostHog**（posthog-kmp 0.11.0，需 Kotlin ≥2.4）——实现 `PostHogTracker`，配置集中在 `postHogConfig()`（projectToken 是公开客户端 key 可入库，debug=true 发布前关掉）。初始化在平台壳：Android `PoiteApp.onCreate` 调 `initPostHog(app)`（必须 Application，不能 Activity），iOS `startKoinIos()` 里调 `initPostHogIos()`。已开 `captureScreenViews=true`（Android 自动 $screen 曝光）+ 生命周期事件。iOS 链接走 Kotlin SwiftPM 集成：依赖变更后跑一次 `XCODEPROJ_PATH="$PWD/iosApp/iosApp.xcodeproj" ./gradlew :shared:integrateLinkagePackage`，生成 `iosApp/KotlinMultiplatformLinkedPackage/` 并自动改 pbxproj，**生成物要提交**，posthog-ios 不需要单独加 SPM。换埋点厂商时**只替换 Koin 绑定**，业务代码零改动；事件名用 snake_case
+- **CrashReporter**（`core/crash`）：**已接 Sentry**——实现 `SentryCrashReporter`，经 `io.sentry.kotlin.multiplatform.gradle` 插件（0.30.0）自动装 SDK；`initKoin` 里最早期调 `initializeSentry()`。iOS 侧 Sentry Cocoa 由 Xcode 工程 SPM 自行引入（provider=NONE + linker.xcodeprojPath 指向 iosApp.xcodeproj）。DSN 在 `core/crash/SentrySetup.kt`，是公开标识符可入库；生产环境的符号化（Android ProGuard mapping / iOS dSYM 上传）待 release 构建时配置
+- 共同模式：**commonMain 接口 + Koin 绑定，三方 SDK 藏在实现层**——换厂商/换实现不动业务代码
+
+## 主题与夜间模式（core/theme，已就位）
+
+- **入口**：`App()` 根部 `AppTheme { ... }`——按 `ThemeController` 的模式选 light/darkColorScheme。组件一律用 `MaterialTheme.colorScheme` 语义色，禁止写死颜色；根布局必须画 `colorScheme.background`（否则窗口底色不随主题）
+- **三档**：SYSTEM / LIGHT / DARK，持久化在 KvStore（`theme_mode`）。系统切换自动重组；`ThemeController.isDark(systemDark)` 也给平台侧用
+- **Android 系统栏**：MainActivity 里 `enableEdgeToEdge` + `SystemBarStyle.auto` 跟随主题（含强制模式），并 collect mode 流即时刷新
+- **iOS 系统启动屏**：`LaunchBackground.colorset` 带 dark 外观（深色 #041619），`LaunchLogo.imageset` 有 dark 变体（无圆底的白 K + 橙三角）；App 内 Splash 页背景用主题色
+- 设置页做主题开关时直接调 `ThemeController.setMode()`
+
+## 网络（Ktor，已引入）
+
+统一入口在 `core/network/`：**所有业务域共用 `createHttpClient()`**（Koin single 注入），禁止各自 new HttpClient。
+
+- `ApiConfig.BASE_URL`：当前是 mock 后端 `https://coolshell.free.beeceptor.com`（后端未就绪），正式环境切换只改这里
+- 已装：ContentNegotiation（kotlinx JSON，ignoreUnknownKeys + isLenient）、HttpTimeout（10s）、`expectSuccess=true`（非 2xx 抛 ResponseException）
+- 引擎：androidMain `cio`（**别用 okhttp**：Ktor 3.6 带的 okhttp-android 5.5 要求 compileSdk 37，本机只有 36）、iosMain `darwin`；commonTest 用 `ktor-client-mock`
+- 各业务域 Api 只写相对 path（如 `SplashApiImpl` 的 `api/splash/config`），返回 domain 模型
+- 结果统一 `Resource.Success/Error` + 类型化 `AppError`（Network/Http/Parse/Unknown），调用侧过 `safeApiCall {}`。**Ktor 3 的 JSON 解析失败抛 `JsonConvertException` 而非 SerializationException**，safeApiCall 已覆盖
+- **接口成败只用 HTTP status 表达**（2xx = 成功），不设计业务 envelope 的 code 字段；错误细节进 AppError，不给 UI 裸 String
+- 本地联调：`adb reverse tcp:8931 tcp:8931` 把设备 localhost 转发到 Mac mock 服务；debug 包经 `androidApp/src/debug/AndroidManifest.xml` 开了 cleartext（release 不带）
+- `Auth bearer` 的刷新请求必须 `markAsRefreshTokenRequest()` 且 `sendWithoutRequest` 限定自己域名。证书绑定（androidMain OkHttp）必须主备双 pin
+
+## 动态启动海报（feature/splash，已就位）
+
+iOS/Android 系统启动屏都是静态的（bundle 签名只读），动态海报 = 系统启动屏 + App 内 Splash 页：
+
+- **domain**：`SplashPoster(id, imageUrl, startAt, endAt, priority, localPath)`（epoch 毫秒，[start, end)）；`selectActivePoster()` 纯函数：已下载 + 生效中 → 优先级最高
+- **data**：`SplashApi` 拉配置 → `SplashRepository.refresh()` 下载新图（URL 变化才重下）、清理失效文件、元数据 JSON 存 KvStore；`SplashFiles` expect/actual 管沙盒文件与 Bitmap 解码（iOS 用 POSIX stdio + Skia `toComposeImageBitmap()`，CMP 1.11 里不是 asImageBitmap）
+- **presentation**：`SplashHost` 包在 `App()` 根部——主内容始终在底层组合，海报盖在上层；**主内容首帧就绪 && 至少 500ms 即切换**（防闪屏，无固定时长），点击立即跳过；无海报零延迟直进。**启动只读缓存不走网络**，`refreshAsync()` 在后台准备下次的
+- 联调 mock 格式见 `SplashApiTest` 的 sampleJson
+
+## 持久化（Room / DataStore KMP，需要时引入）
+
+- Room KMP（KSP）：Database/DAO/Entity 放 commonMain，builder expect/actual（Android 用 Context，iOS 用 `NSHomeDirectory() + "/app.db"`）
+- schema 升版本必须写 `Migration`；查询给 UI 的一律 `Flow<List<T>>`；多步写加 `@Transaction`
+- 大数据集用 Paging 3（`PagingSource` + `Pager` + `.cachedIn(scope)`），禁止全量加载
+- 需要 Room 时给 shared 加：KSP 插件、`androidx.room` 插件、`room-compiler` 用 `ksp { add("kspCommonMainMetadata", ...) }` 方式配置（Room KMP 特有，别按纯 Android 教程配）
+
+## 测试
+
+- 放 `commonTest`，`kotlin.test` + `runTest`；**用 Fake 不用 Mock**（不接 Mockito/MockK）
+- KV 相关测试用 `multiplatform-settings-test` 的 `MapSettings`（1.3.0 起改名，旧名 MockSettings；已在 commonTest 依赖里）
+- 验证：`./gradlew :shared:testDebugUnitTest`
+
+## 日志
+
+用 `AppLogger` 接口（Kermit 实现），注入使用；禁止 `println()`。任何端都不许记 token/邮箱/PII。崩溃上报接入后，release 的 WARN/ERROR 自动转 breadcrumb。
+
+## 红线清单
+
+1. **UI 一律写 commonMain Compose**；禁止给单端单独写原生页面（平台能力调用不算，走 expect/actual）
+2. commonMain 禁止 `android.*`/`platform.*` import（uikitMain 之外的 expect/actual 例外）
+3. 禁止 LiveData，统一 `StateFlow`/`Flow`
+4. 禁止 `GlobalScope`；ViewModel 用 `SupervisorJob()` scope 并暴露 `onCleared()`
+5. 一次性事件禁止放 UiState；事件 SharedFlow 禁止 `replay > 0`
+6. `Resource.Error` 禁止裸 String，用类型化 `AppError`
+7. 禁止把 `Context` 跨层传递——只在 platformModule 边界注入
+8. 禁止硬编码用户可见字符串——走 compose resources
+9. padding 禁止 `left/right`，用 `start/end`；方向图标用 `Icons.AutoMirrored.*`
+10. **iOS Info.plist 必须含 `CADisableMinimumFrameDurationOnPhone=true` 和 `UILaunchScreen`**——删了会闪退/黑边
+11. 版本号禁止写在 build.gradle.kts——一律进 `gradle/libs.versions.toml`
+12. Room 升版本禁止不写 Migration；禁止无分页加载大数据集
+13. 证书绑定必须主备双 pin
+14. 有意义的 Image/Icon 必须有 `contentDescription`（无障碍）
+15. 禁止 `println()` 日志；禁止记敏感数据
+16. 横向能力（日志/埋点/崩溃/缓存）禁止直接依赖三方 SDK——必须经 `core/` 接口 + Koin 绑定；业务代码禁止出现 `co.touchlab.kermit` / `com.russhwolf.settings` 等 import
+
+## 参考
+
+- [KMP 官方文档](https://www.jetbrains.com/help/kotlin-multiplatform-dev/)
+- [Compose Multiplatform](https://www.jetbrains.com/compose-multiplatform/)
+- [compose resources](https://www.jetbrains.com/help/kotlin-multiplatform-dev/compose-multiplatform-resources-usage.html)
+- [Android 架构指南](https://developer.android.com/topic/architecture)
+- [Room KMP](https://developer.android.com/kotlin/multiplatform/room)
+- [Koin Multiplatform](https://insert-koin.io/docs/reference/koin-mp/kmp)
+- [SKIE](https://skie.touchlab.co)
