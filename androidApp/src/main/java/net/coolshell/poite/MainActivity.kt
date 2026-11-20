@@ -5,8 +5,9 @@ import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
-import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import net.coolshell.poite.shared.App
@@ -27,8 +28,14 @@ class MainActivity : ComponentActivity() {
         applySystemBars()
         lifecycleScope.launch { theme.mode.collect { applySystemBars() } }
 
-        setContent {
-            App()
+        val composeView = androidx.compose.ui.platform.ComposeView(this)
+        setContentView(composeView)
+        composeView.setContent {
+            androidx.compose.foundation.layout.Box(
+                modifier = androidx.compose.ui.Modifier.semantics { testTagsAsResourceId = true },
+            ) {
+                App()
+            }
         }
     }
 }

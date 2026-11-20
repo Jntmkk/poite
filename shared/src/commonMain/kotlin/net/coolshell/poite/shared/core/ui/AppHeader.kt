@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import net.coolshell.poite.shared.feature.theme.domain.ThemeSlot
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -64,7 +65,7 @@ fun AppHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (onBack != null) {
-                IconButton(onClick = onBack) {
+                IconButton(onClick = onBack, modifier = Modifier.testTag("header-back-button")) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(Res.string.action_back),
@@ -75,7 +76,7 @@ fun AppHeader(
                     slot = ThemeSlot.AVATAR,
                     defaultRes = Res.drawable.compose_multiplatform,
                     contentDescription = null,
-                    modifier = Modifier.size(40.dp).clip(CircleShape),
+                    modifier = Modifier.size(40.dp).clip(CircleShape).testTag("header-avatar-image"),
                     contentScale = ContentScale.Crop,
                 )
             }
@@ -88,12 +89,12 @@ fun AppHeader(
                 ) {
                     Row {
                         onAdd?.let {
-                            IconButton(onClick = it) {
+                            IconButton(onClick = it, modifier = Modifier.testTag("header-add-button")) {
                                 Icon(Icons.Filled.Add, contentDescription = stringResource(Res.string.action_add))
                             }
                         }
                         onSearch?.let {
-                            IconButton(onClick = it) {
+                            IconButton(onClick = it, modifier = Modifier.testTag("header-search-button")) {
                                 Icon(Icons.Filled.Search, contentDescription = stringResource(Res.string.action_search))
                             }
                         }

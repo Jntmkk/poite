@@ -199,7 +199,7 @@ val homeModule = module {
 - **AppLogger**（`core/logging`）：业务代码只依赖接口；实现是 Kermit（`KermitAppLogger`，platformLogWriter 自动接 logcat/os_log）。**不要**再手写 expect/actual 日志函数
 - **KvStore**（`core/cache`）：multiplatform-settings 后端，Android 用 SharedPreferences、iOS 用 NSUserDefaults。只放配置/标志位
 - **MemoryCache**（`core/cache`）：cache4k，进程内 10 分钟 TTL。接口响应等短生命周期对象
-- **Tracker**（`core/tracking`）：**已接 PostHog**（posthog-kmp 0.11.0，需 Kotlin ≥2.4）——实现 `PostHogTracker`，配置集中在 `postHogConfig()`（projectToken 是公开客户端 key 可入库，debug=true 发布前关掉）。初始化在平台壳：Android `PoiteApp.onCreate` 调 `initPostHog(app)`（必须 Application，不能 Activity），iOS `startKoinIos()` 里调 `initPostHogIos()`。已开 `captureScreenViews=true`（Android 自动 $screen 曝光）+ 生命周期事件。iOS 链接走 Kotlin SwiftPM 集成：依赖变更后跑一次 `XCODEPROJ_PATH="$PWD/iosApp/iosApp.xcodeproj" ./gradlew :shared:integrateLinkagePackage`，生成 `iosApp/KotlinMultiplatformLinkedPackage/` 并自动改 pbxproj，**生成物要提交**，posthog-ios 不需要单独加 SPM。换埋点厂商时**只替换 Koin 绑定**，业务代码零改动；事件名用 snake_case
+- **Tracker**（`core/tracking`）：**已接 PostHog**（posthog-kmp 0.11.0，需 Kotlin ≥2.4）——实现 `PostHogTracker`，配置集中在 `postHogConfig()`（projectToken 是公开客户端 key 可入库，debug=true 发布前关掉）。初始化在平台壳：Android `PoiteApp.onCreate` 调 `initPostHog(app)`（必须 Application，不能 Activity），iOS `startKoinIos()` 里调 `initPostHogIos()`。**事件规范（遵循 kmp-analytics skill）**：所有事件在 `AppEvent` sealed 类里唯一定义（name snake_case + params），禁止裸字符串；`track()` 在事件回调/ViewModel 里调，**不在 Composable 组合体里调**（重组双发）；曝光由 NavHost `DisposableEffect` 按路由统一发 `screen_view`（PostHog 自动 $screen 已关，避免 Android 双计）；接口含 setUserId/identify、setUserProperty、setSuperProperty（PostHog register）；测试用 commonTest 的 `FakeTracker` 断言事件名与参数。换埋点厂商只替换 Koin 绑定，业务代码零改动。iOS 链接走 Kotlin SwiftPM 集成（`integrateLinkagePackage`，见常用命令），生成 `iosApp/KotlinMultiplatformLinkedPackage/` 要提交，posthog-ios 不需单独加 SPM
 - **CrashReporter**（`core/crash`）：**已接 Sentry**——实现 `SentryCrashReporter`，经 `io.sentry.kotlin.multiplatform.gradle` 插件（0.30.0）自动装 SDK；`initKoin` 里最早期调 `initializeSentry()`。iOS 侧 Sentry Cocoa 由 Xcode 工程 SPM 自行引入（provider=NONE + linker.xcodeprojPath 指向 iosApp.xcodeproj）。DSN 在 `core/crash/SentrySetup.kt`，是公开标识符可入库；生产环境的符号化（Android ProGuard mapping / iOS dSYM 上传）待 release 构建时配置
 - 共同模式：**commonMain 接口 + Koin 绑定，三方 SDK 藏在实现层**——换厂商/换实现不动业务代码
 
@@ -233,6 +233,22 @@ val homeModule = module {
 - **内容必须延伸到胶囊下方**才有磨砂：根 NavHost 只消费顶部 padding，页面底部留 ~120dp 空间防遮挡
 - 新加 compose resources 字符串后若报 `_collectCommonMainString0Resources` 等生成代码不同步错误：`rm -rf shared/build/generated/compose` 再构建（增量生成 bug）
 - 现有页面：`feature/home`（计数 demo + 设置入口）、`feature/settings`（主题三档）
+
+## UI 自动化标识（testTag，已全量覆盖）
+
+- 规范遵循 `.agents/skills/quality-engineering-selector-stability`：命名 `<screen>-<element>-<role>` kebab-case；只加叶子可交互/可断言元素；**id 是公开契约，不改名**；contentDescription 不当 test id 用
+- Android 开 resource-id 映射：在 **MainActivity** 根内容 `Modifier.semantics { testTagsAsResourceId = true }`。注意它是 **Android 专属扩展属性**（commonMain 用不了；要 import `androidx.compose.ui.semantics.testTagsAsResourceId`），ComposeView 上没有该属性（别踩）
+- 现有 id：home-click-button / home-counter-text / home-illustration-image、header-avatar-image / header-add-button / header-search-button / header-back-button、bottombar-home-tab / bottombar-settings-tab、settings-theme-{system,light,dark}-option、settings-pack-<id>-card、settings-mock-switch、settings-mock-<scenario>-option、splash-poster-image、app-mock-banner
+- 新 UI 元素必须同步加 id；iOS 的 testTag→accessibilityIdentifier 桥接未实测，写 iOS UI 测试前先验证
+
+## 网络 Mock（core/network/mock，已就位）
+
+- **拦截层**：`installMockInterceptor()` 挂在统一 HttpClient 的 HttpSend 上（Ktor 3），命中场景构造 `HttpClientCall` 响应/抛异常/delay，否则放行。`HttpClientCall` 构造是 Ktor internal API（`io.ktor.utils.io.InternalAPI` 已 opt-in）
+- **MockController**：开关 + 场景（NORMAL/ALL_500/ALL_TIMEOUT/OFFLINE/SLOW/EMPTY/BAD_JSON），KvStore 持久化、实时生效无需重启
+- **仅 debug 可用**：`mockAvailable` expect/actual（Android FLAG_DEBUGGABLE，iOS Platform.isDebugBinary 需 ExperimentalNativeApi opt-in）
+- **UI**：设置页「开发者」组（开关 + 两行分段场景）；active 时 App 根部顶部有 MOCK 标记条
+- 空数据场景按 path 给空结构（list→[]、config→{"posters":[]}）；断网抛 IOException、超时抛 HttpRequestTimeoutException，与 safeApiCall 的 AppError 映射一一对应
+- 细粒度 path 规则编辑器暂未做（需要时加 MockRule）
 
 ## 主题与夜间模式（core/theme，已就位）
 

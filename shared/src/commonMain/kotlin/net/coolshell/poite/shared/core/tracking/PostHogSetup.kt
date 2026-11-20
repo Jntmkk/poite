@@ -7,5 +7,5 @@ internal fun postHogConfig() = PostHogConfig(
     projectToken = "phc_ykCnZZ3CvfhZoEdYnUiSQwu8y2uyvBvADRWfLiuZ6xj5",
     host = PostHogConfig.HOST_US,
     debug = true,
-    captureScreenViews = true,
+    captureScreenViews = false,
 )

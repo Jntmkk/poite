@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hasRoute
@@ -39,6 +40,7 @@ private data class Tab(
     val labelRes: StringResource,
     val icon: ImageVector,
     val slot: String,
+    val testTag: String,
     val isSelected: (NavController) -> Boolean,
     val onClick: (NavController) -> Unit,
 )
@@ -54,6 +56,7 @@ fun AppBottomBar(navController: NavController) {
             labelRes = Res.string.home_title,
             icon = Icons.Filled.Home,
             slot = ThemeSlot.TAB_HOME,
+            testTag = "bottombar-home-tab",
             isSelected = { destination?.hasRoute<HomeRoute>() == true },
             onClick = { it.navigateTab(HomeRoute) },
         ),
@@ -61,6 +64,7 @@ fun AppBottomBar(navController: NavController) {
             labelRes = Res.string.settings_title,
             icon = Icons.Filled.Settings,
             slot = ThemeSlot.TAB_SETTINGS,
+            testTag = "bottombar-settings-tab",
             isSelected = { destination?.hasRoute<SettingsRoute>() == true },
             onClick = { it.navigateTab(SettingsRoute) },
         ),
@@ -90,7 +94,7 @@ fun AppBottomBar(navController: NavController) {
                 }
                 Surface(
                     onClick = { tab.onClick(navController) },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).testTag(tab.testTag),
                     shape = RoundedCornerShape(24.dp),
                     color = if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
                 ) {

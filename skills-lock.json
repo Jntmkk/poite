@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "skills": {
+    "kmp-analytics": {
+      "source": "ronjunevaldoz/kmp-agent-skills",
+      "commit": "d52273243875a7a50e7660c1e61f33b1db857021",
+      "sourceType": "github",
+      "skillPath": "skills/kmp-analytics/SKILL.md",
+      "computedHash": "f509c7350e10430eaf0680f5d5dcb15c0c739ad37589f1d4a41334bb28a6cf51"
+    },
+    "kmp-starter-feature-analytics": {
+      "source": "DevAtrii/Kmp-Starter-Template",
+      "commit": "9e98a87c31d4efa1b46bf448839666b430e0dd5d",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/kmp-starter/starter-features/analytics/SKILL.md",
+      "computedHash": "a011de3ea199f067c23954d8392f9a1da1631ce0a4acb24c1a3f60c4bcc64693"
+    },
+    "quality-engineering-selector-stability": {
+      "source": "HoangNguyen0403/agent-skills-standard",
+      "commit": "04f987a94d33577440270b5a01ff93eb8c59c892",
+      "sourceType": "github",
+      "skillPath": "skills/quality-engineering/quality-engineering-selector-stability/SKILL.md",
+      "computedHash": "d73d87262d0533219cfc3a48d903cfc834d641c5a4db8ccd7671508e5ea00c91"
+    }
+  }
+}

@@ -8,6 +8,7 @@ import net.coolshell.poite.shared.core.crash.initializeSentry
 import net.coolshell.poite.shared.core.logging.AppLogger
 import net.coolshell.poite.shared.core.logging.KermitAppLogger
 import net.coolshell.poite.shared.core.network.createHttpClient
+import net.coolshell.poite.shared.core.network.mock.MockController
 import net.coolshell.poite.shared.core.theme.ThemeController
 import net.coolshell.poite.shared.feature.splash.di.splashModule
 import net.coolshell.poite.shared.feature.theme.di.themeModule
@@ -37,5 +38,6 @@ val coreModule = module {
     single<Tracker> { PostHogTracker() }
     single { createHttpClient() }
     single { ThemeController(get()) }
+    single { MockController(get()) }
     single<CrashReporter> { SentryCrashReporter() }
 }

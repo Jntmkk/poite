@@ -3,17 +3,23 @@ package net.coolshell.poite.shared.core.navigation
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.serialization.Serializable
+import net.coolshell.poite.shared.core.tracking.AppEvent
+import net.coolshell.poite.shared.core.tracking.Tracker
 import net.coolshell.poite.shared.core.ui.LocalHazeState
 import net.coolshell.poite.shared.feature.home.presentation.HomeScreen
 import net.coolshell.poite.shared.feature.settings.presentation.SettingsScreen
+import org.koin.compose.koinInject
 
 @Serializable
 data object HomeRoute
@@ -29,6 +35,15 @@ data object SettingsRoute
 fun AppNavHost() {
     val navController = rememberNavController()
     val hazeState = remember { HazeState() }
+    val tracker = koinInject<Tracker>()
+    val currentEntry by navController.currentBackStackEntryAsState()
+
+    DisposableEffect(currentEntry) {
+        currentEntry?.destination?.route?.let { route ->
+            tracker.track(AppEvent.ScreenView(route.substringAfterLast('.')))
+        }
+        onDispose { }
+    }
     CompositionLocalProvider(LocalHazeState provides hazeState) {
         Scaffold(bottomBar = { AppBottomBar(navController) }) { _ ->
             NavHost(

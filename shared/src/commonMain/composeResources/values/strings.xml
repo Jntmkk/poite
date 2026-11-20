@@ -9,6 +9,15 @@
     <string name="settings_appearance">外观</string>
     <string name="settings_about">关于</string>
     <string name="settings_decoration">装扮</string>
+    <string name="settings_developer">开发者</string>
+    <string name="mock_network">网络 Mock</string>
+    <string name="mock_scenario_normal">正常</string>
+    <string name="mock_scenario_all_500">全部 500</string>
+    <string name="mock_scenario_all_timeout">全部超时</string>
+    <string name="mock_scenario_offline">断网</string>
+    <string name="mock_scenario_slow">慢网络</string>
+    <string name="mock_scenario_empty">空数据</string>
+    <string name="mock_scenario_bad_json">畸形 JSON</string>
     <string name="settings_version">版本</string>
     <string name="theme_default">默认</string>
     <string name="theme_system">跟随系统</string>

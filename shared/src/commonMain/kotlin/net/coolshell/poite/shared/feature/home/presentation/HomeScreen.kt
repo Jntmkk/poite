@@ -27,12 +27,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import net.coolshell.poite.shared.Greeting
 import net.coolshell.poite.shared.core.cache.KvStore
 import net.coolshell.poite.shared.core.logging.AppLogger
+import net.coolshell.poite.shared.core.tracking.AppEvent
 import net.coolshell.poite.shared.core.tracking.Tracker
 import net.coolshell.poite.shared.core.ui.AppHeader
 import net.coolshell.poite.shared.core.ui.LocalThemeAssets
@@ -67,8 +69,8 @@ fun HomeScreen() {
             topBar = {
                 AppHeader(
                     title = "poite",
-                    onAdd = { tracker.track("header_add_click") },
-                    onSearch = { tracker.track("header_search_click") },
+                    onAdd = { tracker.track(AppEvent.HeaderAction("add")) },
+                    onSearch = { tracker.track(AppEvent.HeaderAction("search")) },
                 )
             },
         ) { padding ->
@@ -113,7 +115,7 @@ fun HomeScreen() {
                         slot = ThemeSlot.HOME_ILLUSTRATION,
                         defaultRes = Res.drawable.compose_multiplatform,
                         contentDescription = null,
-                        modifier = Modifier.fillMaxWidth().height(140.dp),
+                        modifier = Modifier.fillMaxWidth().height(140.dp).testTag("home-illustration-image"),
                     )
                     Text(
                         Greeting().greet(),
@@ -134,11 +136,15 @@ fun HomeScreen() {
                     taps++
                     kvStore.putInt("demo_tap_count", taps)
                     logger.i("Demo", "tapped, total=$taps")
-                    tracker.track("demo_tap", mapOf("count" to taps))
+                    tracker.track(AppEvent.DemoTap(taps))
                 },
+                modifier = Modifier.testTag("home-click-button"),
                 shape = RoundedCornerShape(16.dp),
             ) {
-                Text(if (taps == 0) "Click me!" else "Clicked $taps times")
+                Text(
+                    if (taps == 0) "Click me!" else "Clicked $taps times",
+                    modifier = Modifier.testTag("home-counter-text"),
+                )
             }
 
             Spacer(Modifier.height(120.dp))

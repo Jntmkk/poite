@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
@@ -57,12 +58,13 @@ fun SettingsRow(title: String, trailing: String? = null) {
     }
 }
 
-/** 短选项（2~4 个）一律用横向分段选择器，不用 Radio 列表 */
+/** 短选项（2~4 个）一律用横向分段选择器，不用 Radio 列表；testTagFor 给每个选项稳定 id */
 @Composable
 fun <T> SegmentedSelector(
     options: List<Pair<T, String>>,
     selected: T,
     onSelect: (T) -> Unit,
+    testTagFor: ((T) -> String)? = null,
 ) {
     Surface(
         shape = RoundedCornerShape(12.dp),
@@ -76,7 +78,9 @@ fun <T> SegmentedSelector(
                 val isSelected = value == selected
                 Surface(
                     onClick = { onSelect(value) },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .let { base -> testTagFor?.let { base.testTag(it(value)) } ?: base },
                     shape = RoundedCornerShape(8.dp),
                     color = if (isSelected) MaterialTheme.colorScheme.surface else Color.Transparent,
                 ) {
