@@ -34,6 +34,10 @@ XCODEPROJ_PATH="$PWD/iosApp/iosApp.xcodeproj" ./gradlew :shared:integrateLinkage
 # 或直接 Xcode 打开 iosApp.xcodeproj ⌘R；不要手动跑 embedAndSign（它需要 Xcode 环境变量）
 ```
 
+## 协作流程（用户定的规则）
+
+**UI 改动必须先出线框图**（文字/ASCII 示意大概样式与布局），用户确认后才动代码；用户明确要求「完全自动化执行」时除外。非 UI 改动不受此限。
+
 ## 核心原则
 
 1. **最大化共享**——UI、ViewModel、逻辑、数据全在 `commonMain`；平台差异走 expect/actual
@@ -160,7 +164,7 @@ UI 共享后互操作面缩小，但 expect/actual 和平台能力调用仍在�
 
 ## 边到边与 insets
 
-- Android targetSdk 36 强制 edge-to-edge：根布局必须消费 insets。共享 UI 里用 `Modifier.safeContentPadding()`（状态栏+导航栏+挖孔+IME 并集），已在 `App()` 根部应用
+- Android targetSdk 36 强制 edge-to-edge：根布局必须消费 insets。**Header 顶部用 `WindowInsets.safeDrawing.only(Top)`（含挖孔/刘海，别只用 statusBarsPadding）**；底部胶囊用 `navigationBarsPadding()`；内容区底部留 ~120dp 避免被悬浮胶囊遮挡
 - iOS 侧 `ComposeView().ignoresSafeArea()` + Compose 内部的 safeContentPadding 配合，不需要额外处理
 
 ## 资源与 i18n（compose resources）
@@ -199,6 +203,37 @@ val homeModule = module {
 - **CrashReporter**（`core/crash`）：**已接 Sentry**——实现 `SentryCrashReporter`，经 `io.sentry.kotlin.multiplatform.gradle` 插件（0.30.0）自动装 SDK；`initKoin` 里最早期调 `initializeSentry()`。iOS 侧 Sentry Cocoa 由 Xcode 工程 SPM 自行引入（provider=NONE + linker.xcodeprojPath 指向 iosApp.xcodeproj）。DSN 在 `core/crash/SentrySetup.kt`，是公开标识符可入库；生产环境的符号化（Android ProGuard mapping / iOS dSYM 上传）待 release 构建时配置
 - 共同模式：**commonMain 接口 + Koin 绑定，三方 SDK 藏在实现层**——换厂商/换实现不动业务代码
 
+## 装扮主题（feature/theme，已就位）
+
+- **模型**：`ThemePack(id, name, version, previewColor, colors{light/dark}, assets{slot→url})`。色板只覆盖关键槽位（primary/onPrimary/background/surface/surfaceVariant/onSurface），其余 M3 默认推导；资源槽位见 `ThemeSlot`（avatar/homeIllustration/background/tabHome/tabSettings/splashPoster）
+- **接口**：`GET api/theme/list`、`GET api/theme/{id}`（mock 同海报的本地 server 套路，adb reverse）
+- **仓库**：`ThemePackRepository`——激活时下载素材到沙盒（files/theme/），`LoadedThemePack(pack, localAssets)` 持久化 KvStore，启动同步读取零网络；active=null 即默认主题（全内置）
+- **换肤两个正交维度**：深浅色模式（ThemeController.mode）× 装扮色板（ThemePackRepository.active）。`AppTheme` 合成最终 colorScheme 并 provide `LocalThemeAssets`；图片统一 `ThemeAssetImage(slot, defaultRes)` 有素材用本地文件、无则回退内置图
+- **启动海报**：激活时 `SplashRepository.setThemePoster()` 注入，priority=1（低于运营海报）
+- **图片加载**：本地文件用 `decodeImageBitmap(path)`；网络预览图用 `NetworkImage`（内存 → 磁盘（cacheDir/images）→ 网络三级缓存，断网可读盘），字节解码 `decodeImageBytes`。别写无缓存的实时请求图片组件；列表大图场景换 Coil3
+- **坑**：Compose 的 `Color(ULong)` 是打包位构造器，ARGB 必须用 `Color(Long)`（parseHexColor 已修正并有单测）
+
+## 设置页 UI 规范（feature/settings，已就位）
+
+- **分组**：`SettingsGroup`（小字组名 + 圆角卡片），组间 20dp；卡片内 `SettingsRow`（左标题 + 右侧值/控件）。新选项归入对应分组，禁止全页平铺
+- **选项控件**：2~4 个短选项一律 `SegmentedSelector`（横向分段，占一行），禁止 Radio 纵向列表浪费空间；选项多或文案长才用列表行
+- **标题**：工具型页面（设置等）省略大标题——`AppHeader()` 不传 title；品牌/内容页保留大标题
+- 参考实现：`SettingsScreen`（外观分段 + 关于分组）
+
+## 导航与 Header（已就位）
+
+- **导航**：navigation-compose 2.9.2（KMP 官方），类型安全路由（`@Serializable data object XxxRoute`）。全局路由表在 `core/navigation/AppNavHost.kt`（根 Scaffold 含底部栏）；新页面 = 加 Route + `composable<XxxRoute>` 注册 + 页面自带 Scaffold
+- **底部 Tab**：`AppBottomBar`——**悬浮胶囊样式**（圆角 50 浮起 + 阴影，选中项药丸高亮 surfaceVariant + primary 色）。新 tab 在 `tabs` 列表加一项 + 注册 composable。tab 切换用 `popUpTo(HomeRoute::class) saveState + launchSingleTop + restoreState`；**顶级 tab 页不带返回键**，下钻页（非 tab）才用 `onBack`
+- **Header**：统一 `core/ui/AppHeader`——**大标题样式**（左圆形头像/下钻页返回键 + 右侧胶囊操作组 + headlineLarge 大标题）。页面结构固定为 `Scaffold(topBar = { AppHeader(...) }) { padding -> 内容消费 padding }`；胶囊操作只埋点不做事时也要接 track 事件
+
+## Liquid Glass 磨砂（Haze，已就位）
+
+- 库：`dev.chrisbanes.haze:haze + haze-materials` **1.6.10**（1.7.x 要求 compileSdk 37，本机 36 不可用）
+- 原理：跨端 backdrop 模糊（Skia 实现，非苹果原生折射）。根 `AppNavHost` provide `LocalHazeState` + 内容侧 `hazeSource`；胶囊用 `Modifier.glass(shape)`（`core/ui/Glass.kt`，clip + hazeEffect ultraThin）。**胶囊 Surface 底色必须用半透明主题色**（`surfaceContainerHigh.copy(alpha = 0.6f)`），不能用 Transparent——ultraThin 在纯色背景上几乎不可见
+- **内容必须延伸到胶囊下方**才有磨砂：根 NavHost 只消费顶部 padding，页面底部留 ~120dp 空间防遮挡
+- 新加 compose resources 字符串后若报 `_collectCommonMainString0Resources` 等生成代码不同步错误：`rm -rf shared/build/generated/compose` 再构建（增量生成 bug）
+- 现有页面：`feature/home`（计数 demo + 设置入口）、`feature/settings`（主题三档）
+
 ## 主题与夜间模式（core/theme，已就位）
 
 - **入口**：`App()` 根部 `AppTheme { ... }`——按 `ThemeController` 的模式选 light/darkColorScheme。组件一律用 `MaterialTheme.colorScheme` 语义色，禁止写死颜色；根布局必须画 `colorScheme.background`（否则窗口底色不随主题）
@@ -211,7 +246,7 @@ val homeModule = module {
 
 统一入口在 `core/network/`：**所有业务域共用 `createHttpClient()`**（Koin single 注入），禁止各自 new HttpClient。
 
-- `ApiConfig.BASE_URL`：当前是 mock 后端 `https://coolshell.free.beeceptor.com`（后端未就绪），正式环境切换只改这里
+- `ApiConfig.BASE_URL`：当前是 **Cloudflare Worker mock** `https://api.coolshell.net`（自有域名，poite-mock worker，素材 base64 内嵌单文件部署，wrangler 配置在 /tmp/poite_worker）。beeceptor 已弃用。本地联调替代方案：`adb reverse tcp:8931 tcp:8931` + 本地 python mock（iOS 真机访问不了 Mac localhost，必须用 Worker）
 - 已装：ContentNegotiation（kotlinx JSON，ignoreUnknownKeys + isLenient）、HttpTimeout（10s）、`expectSuccess=true`（非 2xx 抛 ResponseException）
 - 引擎：androidMain `cio`（**别用 okhttp**：Ktor 3.6 带的 okhttp-android 5.5 要求 compileSdk 37，本机只有 36）、iosMain `darwin`；commonTest 用 `ktor-client-mock`
 - 各业务域 Api 只写相对 path（如 `SplashApiImpl` 的 `api/splash/config`），返回 domain 模型

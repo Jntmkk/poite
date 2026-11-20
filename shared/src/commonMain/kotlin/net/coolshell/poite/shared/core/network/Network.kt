@@ -8,7 +8,7 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 
 object ApiConfig {
-    const val BASE_URL = "https://coolshell.free.beeceptor.com"
+    const val BASE_URL = "https://api.coolshell.net"
 }
 
 /**

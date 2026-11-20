@@ -10,6 +10,7 @@ import net.coolshell.poite.shared.core.logging.KermitAppLogger
 import net.coolshell.poite.shared.core.network.createHttpClient
 import net.coolshell.poite.shared.core.theme.ThemeController
 import net.coolshell.poite.shared.feature.splash.di.splashModule
+import net.coolshell.poite.shared.feature.theme.di.themeModule
 import net.coolshell.poite.shared.core.tracking.PostHogTracker
 import net.coolshell.poite.shared.core.tracking.Tracker
 import org.koin.core.KoinApplication
@@ -21,7 +22,7 @@ fun initKoin(appDeclaration: KoinAppDeclaration = {}): KoinApplication {
     initializeSentry()
     return startKoin {
         appDeclaration()
-        modules(platformModule(), coreModule, splashModule)
+        modules(platformModule(), coreModule, splashModule, themeModule)
     }
 }
 

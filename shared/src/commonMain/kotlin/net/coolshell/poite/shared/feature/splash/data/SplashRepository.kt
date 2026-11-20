@@ -58,6 +58,17 @@ class SplashRepository(
         logger.i(TAG, "refreshed: ${updated.size} posters")
     }
 
+    /** 装扮主题海报：priority 固定 1（低于运营海报），传 null 移除 */
+    fun setThemePoster(poster: SplashPoster?) {
+        val others = readPosters().filter { it.id != THEME_POSTER_ID }
+        val updated = if (poster != null) {
+            others + poster.copy(id = THEME_POSTER_ID, priority = 1)
+        } else {
+            others
+        }
+        kvStore.putString(KEY_POSTERS, json.encodeToString(updated))
+    }
+
     private fun readPosters(): List<SplashPoster> =
         runCatching {
             json.decodeFromString<List<SplashPoster>>(kvStore.getString(KEY_POSTERS, "[]"))
@@ -66,5 +77,6 @@ class SplashRepository(
     companion object {
         private const val TAG = "Splash"
         private const val KEY_POSTERS = "splash_posters_json"
+        private const val THEME_POSTER_ID = "theme_pack"
     }
 }
