@@ -241,6 +241,21 @@ val homeModule = module {
 - 现有 id：home-click-button / home-counter-text / home-illustration-image、header-avatar-image / header-add-button / header-search-button / header-back-button、bottombar-home-tab / bottombar-settings-tab、settings-theme-{system,light,dark}-option、settings-pack-<id>-card、settings-mock-switch、settings-mock-<scenario>-option、splash-poster-image、app-mock-banner
 - 新 UI 元素必须同步加 id；iOS 的 testTag→accessibilityIdentifier 桥接未实测，写 iOS UI 测试前先验证
 
+## 存储 Mock（StorageFaultController，已就位）
+
+- 与网络 Mock 同套思路：**独立开关**（开启后才展示场景选项）+ KvStore 场景 + 实时生效 + debug 限定。场景：NORMAL / READ_FAIL / WRITE_FAIL / ENOSPC / CORRUPT_IMAGE
+- 注入点：`StorageStats` 的读函数抛 IOException；各域 `save()` 抛 IOException（WRITE_FAIL/ENOSPC）；`ImageDiskCache.save` 在 CORRUPT_IMAGE 时写坏字节（解码失败回退默认图）
+- **StorageManager 有异常路径**：usage() 失败返回 `error=true`（UI 显示「不可用」而非假 0）；clearCache() 返回 Boolean（失败弹「清除失败」）
+- 脏数据场景（文件被外部删但元数据在）不需要专门 mock——手动删 files/theme 即可验证自愈
+- 设置页开发者组有「存储异常」两行分段选择器；可与网络 Mock 组合（断网 + 存储异常）
+
+## 存储管理（core/storage，已就位）
+
+- **统一收口 `StorageManager`**：用量统计（递归目录大小）+ `clearCache()`。**分类按「能否再生成」而非目录**：缓存 = 图片磁盘缓存（cacheDir/images）、海报（files/splash）、主题素材（files/theme）；数据 = KvStore 文件（永不清）
+- 各存储域必须暴露 `rootPath()` 并纳入 StorageManager 的 cacheDirs；新存储域照此登记
+- **清理元数据自愈**：海报靠 activePoster 的文件存在过滤自动失效重下；主题调 `ThemePackRepository.onCacheCleared()` 回退默认显示但**保留 KV 里的包选择**，重新激活即重下；KvStore 一个字节不动
+- 设置页「存储」组：缓存/数据用量 + 清除缓存（AlertDialog 确认），tag `settings-clear-cache-button`
+
 ## 网络 Mock（core/network/mock，已就位）
 
 - **拦截层**：`installMockInterceptor()` 挂在统一 HttpClient 的 HttpSend 上（Ktor 3），命中场景构造 `HttpClientCall` 响应/抛异常/delay，否则放行。`HttpClientCall` 构造是 Ktor internal API（`io.ktor.utils.io.InternalAPI` 已 opt-in）

@@ -13,8 +13,12 @@ actual object SplashFiles {
     }
 
     actual fun pathFor(id: String): String = File(dir, "$id.img").absolutePath
+    actual fun rootPath(): String = dir.absolutePath
     actual fun exists(path: String): Boolean = File(path).isFile
-    actual fun save(path: String, bytes: ByteArray) = File(path).writeBytes(bytes)
+    actual fun save(path: String, bytes: ByteArray) {
+        net.coolshell.poite.shared.core.storage.StorageFaults.checkWrite()
+        File(path).writeBytes(bytes)
+    }
     actual fun delete(path: String) { File(path).delete() }
     actual fun loadBitmap(path: String): ImageBitmap? =
         runCatching { BitmapFactory.decodeFile(path)?.asImageBitmap() }.getOrNull()

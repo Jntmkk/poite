@@ -68,7 +68,6 @@ fun HomeScreen() {
             containerColor = Color.Transparent,
             topBar = {
                 AppHeader(
-                    title = "poite",
                     onAdd = { tracker.track(AppEvent.HeaderAction("add")) },
                     onSearch = { tracker.track(AppEvent.HeaderAction("search")) },
                 )

@@ -11,7 +11,16 @@ actual object ImageDiskCache {
 
     private fun file(url: String) = File(dir, url.hashCode().toString(16))
 
+    actual fun rootPath(): String = dir.absolutePath
+
     actual fun cachedPath(url: String): String? = file(url).takeIf { it.isFile }?.absolutePath
-    actual fun save(url: String, bytes: ByteArray): String =
-        file(url).apply { writeBytes(bytes) }.absolutePath
+    actual fun save(url: String, bytes: ByteArray): String {
+        net.coolshell.poite.shared.core.storage.StorageFaults.checkWrite()
+        val payload = if (net.coolshell.poite.shared.core.storage.StorageFaults.corruptOnWrite()) {
+            ByteArray(16)
+        } else {
+            bytes
+        }
+        return file(url).apply { writeBytes(payload) }.absolutePath
+    }
 }

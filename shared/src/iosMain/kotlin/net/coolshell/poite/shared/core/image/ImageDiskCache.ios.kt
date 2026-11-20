@@ -22,15 +22,23 @@ actual object ImageDiskCache {
 
     private fun file(url: String) = "$dir/${url.hashCode().toString(16)}"
 
+    actual fun rootPath(): String = dir
+
     actual fun cachedPath(url: String): String? =
         file(url).takeIf { NSFileManager.defaultManager.fileExistsAtPath(it) }
 
     actual fun save(url: String, bytes: ByteArray): String {
+        net.coolshell.poite.shared.core.storage.StorageFaults.checkWrite()
+        val payload = if (net.coolshell.poite.shared.core.storage.StorageFaults.corruptOnWrite()) {
+            ByteArray(16)
+        } else {
+            bytes
+        }
         val path = file(url)
         val file = fopen(path, "wb")
         if (file != null) {
             try {
-                bytes.usePinned { fwrite(it.addressOf(0), 1uL, bytes.size.toULong(), file) }
+                payload.usePinned { fwrite(it.addressOf(0), 1uL, payload.size.toULong(), file) }
             } finally {
                 fclose(file)
             }

@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 
 /** 海报文件的读写与解码，平台各自实现（沙盒目录） */
 expect object SplashFiles {
+    fun rootPath(): String
     fun pathFor(id: String): String
     fun exists(path: String): Boolean
     fun save(path: String, bytes: ByteArray)

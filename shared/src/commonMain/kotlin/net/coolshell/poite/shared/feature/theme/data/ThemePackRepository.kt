@@ -123,6 +123,11 @@ class ThemePackRepository(
             json.decodeFromString<LoadedThemePack>(kvStore.getString(KEY_PACK_CACHE_PREFIX + id))
         }.getOrNull()?.takeIf { loaded -> loaded.localAssets.values.all { ThemeFiles.exists(it) } }
 
+    /** 缓存被外部清理后调用：素材已删则回退默认显示；包选择保留在 KV，重新激活即重下 */
+    fun onCacheCleared() {
+        _active.value = readActive()
+    }
+
     private fun readActive(): LoadedThemePack? =
         runCatching { json.decodeFromString<LoadedThemePack>(kvStore.getString(KEY_ACTIVE)) }.getOrNull()
             ?.takeIf { loaded -> loaded.localAssets.values.all { ThemeFiles.exists(it) } }

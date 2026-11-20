@@ -10,7 +10,11 @@ actual object ThemeFiles {
     }
 
     actual fun pathFor(packId: String, slot: String): String = File(dir, "$packId-$slot.img").absolutePath
+    actual fun rootPath(): String = dir.absolutePath
     actual fun exists(path: String): Boolean = File(path).isFile
-    actual fun save(path: String, bytes: ByteArray) = File(path).writeBytes(bytes)
+    actual fun save(path: String, bytes: ByteArray) {
+        net.coolshell.poite.shared.core.storage.StorageFaults.checkWrite()
+        File(path).writeBytes(bytes)
+    }
     actual fun delete(path: String) { File(path).delete() }
 }

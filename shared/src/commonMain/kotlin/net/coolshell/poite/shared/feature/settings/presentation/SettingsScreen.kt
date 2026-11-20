@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -25,10 +26,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,6 +43,10 @@ import androidx.compose.ui.unit.dp
 import net.coolshell.poite.shared.core.network.mock.MockController
 import net.coolshell.poite.shared.core.network.mock.MockScenario
 import net.coolshell.poite.shared.core.network.mock.mockAvailable
+import net.coolshell.poite.shared.core.storage.StorageFault
+import net.coolshell.poite.shared.core.storage.StorageFaultController
+import net.coolshell.poite.shared.core.storage.StorageManager
+import net.coolshell.poite.shared.core.storage.formatBytes
 import net.coolshell.poite.shared.core.theme.ThemeController
 import net.coolshell.poite.shared.core.tracking.AppEvent
 import net.coolshell.poite.shared.core.tracking.Tracker
@@ -55,7 +64,22 @@ import net.coolshell.poite.shared.generated.resources.mock_scenario_empty
 import net.coolshell.poite.shared.generated.resources.mock_scenario_normal
 import net.coolshell.poite.shared.generated.resources.mock_scenario_offline
 import net.coolshell.poite.shared.generated.resources.mock_scenario_slow
+import net.coolshell.poite.shared.generated.resources.action_cancel
+import net.coolshell.poite.shared.generated.resources.action_confirm
+import net.coolshell.poite.shared.generated.resources.action_ok
+import net.coolshell.poite.shared.generated.resources.fault_corrupt
+import net.coolshell.poite.shared.generated.resources.fault_enospc
+import net.coolshell.poite.shared.generated.resources.fault_normal
+import net.coolshell.poite.shared.generated.resources.fault_read_fail
+import net.coolshell.poite.shared.generated.resources.fault_write_fail
 import net.coolshell.poite.shared.generated.resources.settings_about
+import net.coolshell.poite.shared.generated.resources.settings_storage
+import net.coolshell.poite.shared.generated.resources.storage_clear
+import net.coolshell.poite.shared.generated.resources.storage_cache
+import net.coolshell.poite.shared.generated.resources.storage_clear_failed
+import net.coolshell.poite.shared.generated.resources.storage_data
+import net.coolshell.poite.shared.generated.resources.storage_fault
+import net.coolshell.poite.shared.generated.resources.storage_unavailable
 import net.coolshell.poite.shared.generated.resources.settings_developer
 import net.coolshell.poite.shared.generated.resources.settings_appearance
 import net.coolshell.poite.shared.generated.resources.settings_decoration
@@ -158,6 +182,88 @@ fun SettingsScreen() {
                             Spacer(Modifier.height(8.dp))
                         }
                     }
+                    val faultController = koinInject<StorageFaultController>()
+                    val faultEnabled by faultController.enabled.collectAsState()
+                    val fault by faultController.fault.collectAsState()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(Res.string.storage_fault), style = MaterialTheme.typography.bodyLarge)
+                        Spacer(Modifier.weight(1f))
+                        Switch(
+                            checked = faultEnabled,
+                            onCheckedChange = faultController::setEnabled,
+                            modifier = Modifier.testTag("settings-storage-mock-switch"),
+                        )
+                    }
+                    if (faultEnabled) {
+                        Spacer(Modifier.height(8.dp))
+                        faultRows.forEach { row ->
+                            SegmentedSelector(
+                                options = row.map { it to stringResource(it.labelRes()) },
+                                selected = fault,
+                                onSelect = faultController::setFault,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                }
+            }
+            SettingsGroup(label = stringResource(Res.string.settings_storage)) {
+                val storage = koinInject<StorageManager>()
+                var usage by remember { mutableStateOf(storage.usage()) }
+                var showClearDialog by remember { mutableStateOf(false) }
+                var showClearError by remember { mutableStateOf(false) }
+
+                SettingsRow(
+                    title = stringResource(Res.string.storage_cache),
+                    trailing = if (usage.error) stringResource(Res.string.storage_unavailable) else formatBytes(usage.cacheBytes),
+                )
+                SettingsRow(
+                    title = stringResource(Res.string.storage_data),
+                    trailing = if (usage.error) stringResource(Res.string.storage_unavailable) else formatBytes(usage.dataBytes),
+                )
+                TextButton(
+                    onClick = { showClearDialog = true },
+                    modifier = Modifier.testTag("settings-clear-cache-button"),
+                ) {
+                    Text(stringResource(Res.string.storage_clear), color = MaterialTheme.colorScheme.error)
+                }
+
+                if (showClearDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showClearDialog = false },
+                        title = { Text(stringResource(Res.string.storage_clear)) },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                if (storage.clearCache()) {
+                                    usage = storage.usage()
+                                } else {
+                                    showClearError = true
+                                }
+                                showClearDialog = false
+                            }) {
+                                Text(stringResource(Res.string.action_confirm))
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showClearDialog = false }) {
+                                Text(stringResource(Res.string.action_cancel))
+                            }
+                        },
+                    )
+                }
+                if (showClearError) {
+                    AlertDialog(
+                        onDismissRequest = { showClearError = false },
+                        title = { Text(stringResource(Res.string.storage_clear_failed)) },
+                        confirmButton = {
+                            TextButton(onClick = { showClearError = false }) {
+                                Text(stringResource(Res.string.action_ok))
+                            }
+                        },
+                    )
                 }
             }
             SettingsGroup(label = stringResource(Res.string.settings_about)) {
@@ -237,4 +343,17 @@ private fun MockScenario.labelRes(): StringResource = when (this) {
     MockScenario.SLOW -> Res.string.mock_scenario_slow
     MockScenario.EMPTY -> Res.string.mock_scenario_empty
     MockScenario.BAD_JSON -> Res.string.mock_scenario_bad_json
+}
+
+private val faultRows = listOf(
+    listOf(StorageFault.NORMAL, StorageFault.READ_FAIL, StorageFault.WRITE_FAIL),
+    listOf(StorageFault.ENOSPC, StorageFault.CORRUPT_IMAGE),
+)
+
+private fun StorageFault.labelRes(): StringResource = when (this) {
+    StorageFault.NORMAL -> Res.string.fault_normal
+    StorageFault.READ_FAIL -> Res.string.fault_read_fail
+    StorageFault.WRITE_FAIL -> Res.string.fault_write_fail
+    StorageFault.ENOSPC -> Res.string.fault_enospc
+    StorageFault.CORRUPT_IMAGE -> Res.string.fault_corrupt
 }

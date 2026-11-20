@@ -26,9 +26,11 @@ actual object SplashFiles {
     }
 
     actual fun pathFor(id: String): String = "$dir/$id.img"
+    actual fun rootPath(): String = dir
     actual fun exists(path: String): Boolean = NSFileManager.defaultManager.fileExistsAtPath(path)
 
     actual fun save(path: String, bytes: ByteArray) {
+        net.coolshell.poite.shared.core.storage.StorageFaults.checkWrite()
         val file = fopen(path, "wb") ?: return
         try {
             bytes.usePinned { fwrite(it.addressOf(0), 1uL, bytes.size.toULong(), file) }

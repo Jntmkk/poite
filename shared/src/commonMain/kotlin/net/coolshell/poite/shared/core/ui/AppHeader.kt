@@ -90,12 +90,20 @@ fun AppHeader(
                     Row {
                         onAdd?.let {
                             IconButton(onClick = it, modifier = Modifier.testTag("header-add-button")) {
-                                Icon(Icons.Filled.Add, contentDescription = stringResource(Res.string.action_add))
+                                Icon(
+                                    Icons.Filled.Add,
+                                    contentDescription = stringResource(Res.string.action_add),
+                                    modifier = Modifier.size(20.dp),
+                                )
                             }
                         }
                         onSearch?.let {
                             IconButton(onClick = it, modifier = Modifier.testTag("header-search-button")) {
-                                Icon(Icons.Filled.Search, contentDescription = stringResource(Res.string.action_search))
+                                Icon(
+                                    Icons.Filled.Search,
+                                    contentDescription = stringResource(Res.string.action_search),
+                                    modifier = Modifier.size(20.dp),
+                                )
                             }
                         }
                     }
