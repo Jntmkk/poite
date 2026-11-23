@@ -55,3 +55,18 @@ jobs:
           path: androidApp/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
+
+  auto-merge:
+    name: Auto-merge starred release PR
+    if: github.event_name == 'pull_request' && contains(github.head_ref, '*')
+    needs: android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Enable squash auto-merge after CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr merge "$PR_NUMBER" --auto --squash --delete-branch

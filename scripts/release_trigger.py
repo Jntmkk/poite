@@ -11,19 +11,28 @@ import subprocess
 
 
 MARKER_RE = re.compile(r"\[release(?:=(patch|minor|major))?\]", re.IGNORECASE)
+STARRED_COMMIT_RE = re.compile(r"^[a-z]+(?:\([^)]*\))?[*!]+:", re.IGNORECASE)
 CONVENTIONAL_RE = re.compile(r"^(?P<type>[a-z]+)(?:\([^)]*\))?(?P<breaking>!)?:", re.IGNORECASE)
 RELEASE_BRANCH_PREFIX = "release-please--branches--master"
 
 
 def marker_level(*values: str | None) -> str | None:
-    """Return the requested bump level, defaulting to patch for [release]."""
+    """Return the requested bump level; a starred source branch opts in."""
+    level = None
     for value in values:
         if not value:
             continue
+        if "*" in value and not MARKER_RE.search(value):
+            level = level or "patch"
         match = MARKER_RE.search(value)
         if match:
             return (match.group(1) or "patch").lower()
-    return None
+    return level
+
+
+def release_message(message: str) -> str:
+    """Convert BiliSum-style fix*: / feat*: into Conventional Commits."""
+    return STARRED_COMMIT_RE.sub(lambda match: match[0].replace("*", ""), message, count=1)
 
 
 def conventional_level(message: str) -> str | None:
@@ -64,7 +73,7 @@ def main() -> int:
     message = os.environ.get("HEAD_COMMIT_MESSAGE", "")
     pull_requests = gh("api", f"repos/{repository}/commits/{sha}/pulls")
     level = marker_level(
-        message,
+        message if "*" in message or MARKER_RE.search(message) else "",
         *(pr.get("title") for pr in pull_requests),
         *(pr.get("body") for pr in pull_requests),
         *(pr.get("head", {}).get("ref") for pr in pull_requests),

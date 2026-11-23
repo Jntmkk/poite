@@ -13,12 +13,13 @@
 3. 合入 `master` 后，Release Please 创建或更新 Release PR，包含 `CHANGELOG.md`、`version.txt` 和 Android 版本变更。
 4. 选择发布方式：
    - **常规发布**：检查并手动合并 Release PR。
-   - **显式自动发布**：在功能 PR 的标题、正文或源分支名中加入 `[release]`，功能 PR 合并到 `master` 后会自动合并已准备好的 Release PR 并继续发布，无需第二次人工合并。也可用 `[release=minor]`、`[release=major]` 指定升级幅度。
-5. 若显式发布时已有待发布 Release PR，沿用该 PR 计算出的版本；若尚未有 Release PR，则自动创建一个。没有 Release PR 且提交不符合常规版本规则时，`[release]` 默认增加 patch；`feat:` / `feat!:` 等常规提交优先按自身语义升级。
+   - **星号自动发布（默认）**：源分支名包含 `*`，例如 `feat/new-screen-*`。该 PR 在 CI 通过后自动 squash 合并到 `master`，随后自动维护并合并 Release PR，继续构建与发布，无需人工二次确认。
+   - **显式自动发布**：也可在 PR 标题、正文或分支名写 `[release]`；用 `[release=minor]`、`[release=major]` 指定升级幅度。PR 标题/合并提交中的 `feat*:`、`fix*:` 等星号形式也会触发发布。
+5. 若自动发布时已有待发布 Release PR，沿用该 PR 计算出的版本；若尚未有 Release PR，则自动创建一个。没有 Release PR 且提交不符合常规版本规则时，星号或 `[release]` 默认增加 patch；`feat:` / `feat!:` 等常规提交优先按自身语义升级。
 6. Release Please 创建 `vX.Y.Z` Tag 和**草稿** GitHub Release。Release 正文来自变更 PR/提交，包含分类日志及 PR 链接。
 7. 工作流检出该 Tag，构建签名 APK/AAB、校验 APK 签名与版本，上传资产后才公开 Release。更新日志不会被构建步骤改写。
 
-示例：`fix: 修复缓存 [release]`、`feat/release-screen`、`[release=minor]`。标记不区分大小写；不要把 `[release]` 用在 Release Please 自己的 PR 标题中。自动发布依赖功能 PR 已通过 CI。
+示例：`feat/new-screen-*`、`fix: 修复缓存 [release]`、`fix*: 修复缓存`、`[release=minor]`。自动发布依赖功能 PR 已通过 CI。仓库需开启 **Allow auto-merge**；若 `master` 要求 PR 审查，机器人自动合并仍需满足该规则。
 
 `versionCode = major * 1,000,000 + minor * 1,000 + patch`，因此 minor、patch 必须在 `0..999`。首个自动化版本从 `1.0.0` 开始；这使它的 Android `versionCode` 为 `1000000`。
 
