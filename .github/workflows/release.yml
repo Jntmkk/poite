@@ -17,13 +17,39 @@ jobs:
       issues: write
       pull-requests: write
     outputs:
-      created: ${{ steps.release.outputs.release_created }}
-      tag: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
+      created: ${{ steps.release.outputs.release_created || steps.release_after_merge.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name || steps.release_after_merge.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version || steps.release_after_merge.outputs.version }}
     steps:
-      - name: Maintain release PR and GitHub release
+      - name: Checkout version and trigger logic
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Detect explicit release trigger
+        id: trigger
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: python3 scripts/release_trigger.py
+
+      - name: Maintain release PR and draft GitHub release
         id: release
         uses: googleapis/release-please-action@0dfd8538845b8e92600d271a895a5372865d4062 # v5
+        with:
+          release-as: ${{ steps.trigger.outputs.release_as }}
+
+      - name: Merge explicit release PR
+        if: steps.trigger.outputs.auto == 'true' && steps.trigger.outputs.pending_pr != '' && steps.release.outputs.release_created != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.trigger.outputs.pending_pr }}
+        run: gh pr merge "$PR_NUMBER" --squash --delete-branch
+
+      - name: Create draft release after auto-merging release PR
+        if: steps.trigger.outputs.auto == 'true' && steps.trigger.outputs.pending_pr != '' && steps.release.outputs.release_created != 'true'
+        id: release_after_merge
+        uses: googleapis/release-please-action@0dfd8538845b8e92600d271a895a5372865d4062 # v5
+        with:
+          skip-github-pull-request: true
 
   android:
     name: Build and publish Android ${{ needs.prepare.outputs.version }}
@@ -111,8 +137,14 @@ jobs:
           cp "$aab" "$output/poite-$RELEASE_VERSION.aab"
           (cd "$output" && sha256sum poite-*.apk poite-*.aab > checksums.txt)
 
-      - name: Upload assets to GitHub Release
+      - name: Upload assets to draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/release-artifacts/"*
+
+      - name: Publish verified GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release edit "$RELEASE_TAG" --draft=false

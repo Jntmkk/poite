@@ -32,6 +32,9 @@ jobs:
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/master' }}
 
+      - name: Test release trigger
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+
       - name: Test shared code and build Android
         run: ./gradlew :shared:testDebugUnitTest :androidApp:assembleDebug --stacktrace
 
