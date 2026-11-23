@@ -1,3 +1,3 @@
 # Changelog
 
-Release notes are maintained in Release PRs and published to GitHub Releases.
+<!-- Release Please adds new version sections below this heading. -->
