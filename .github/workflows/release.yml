@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+
+concurrency:
+  group: release-master
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Create or update release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      created: ${{ steps.release.outputs.release_created || steps.release_after_merge.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name || steps.release_after_merge.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version || steps.release_after_merge.outputs.version }}
+    steps:
+      - name: Checkout version and trigger logic
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Detect explicit release trigger
+        id: trigger
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: python3 scripts/release_trigger.py
+
+      - name: Maintain release PR and draft GitHub release
+        id: release
+        uses: googleapis/release-please-action@0dfd8538845b8e92600d271a895a5372865d4062 # v5
+        with:
+          release-as: ${{ steps.trigger.outputs.release_as }}
+
+      - name: Merge explicit release PR
+        if: steps.trigger.outputs.auto == 'true' && steps.trigger.outputs.pending_pr != '' && steps.release.outputs.release_created != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.trigger.outputs.pending_pr }}
+        run: gh pr merge "$PR_NUMBER" --squash --delete-branch
+
+      - name: Create draft release after auto-merging release PR
+        if: steps.trigger.outputs.auto == 'true' && steps.trigger.outputs.pending_pr != '' && steps.release.outputs.release_created != 'true'
+        id: release_after_merge
+        uses: googleapis/release-please-action@0dfd8538845b8e92600d271a895a5372865d4062 # v5
+        with:
+          skip-github-pull-request: true
+
+  android:
+    name: Build and publish Android ${{ needs.prepare.outputs.version }}
+    if: needs.prepare.outputs.created == 'true'
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      POITE_KEYSTORE_PASSWORD: ${{ secrets.POITE_KEYSTORE_PASSWORD }}
+      POITE_KEY_ALIAS: ${{ secrets.POITE_KEY_ALIAS }}
+      POITE_KEY_PASSWORD: ${{ secrets.POITE_KEY_PASSWORD }}
+    steps:
+      - name: Check release version
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          [[ "$RELEASE_TAG" == "v$RELEASE_VERSION" ]]
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          IFS=. read -r major minor patch <<< "$RELEASE_VERSION"
+          if ((minor > 999 || patch > 999)); then
+            echo "::error::Minor and patch versions must not exceed 999."
+            exit 1
+          fi
+
+      - name: Check signing secrets
+        env:
+          POITE_KEYSTORE_BASE64: ${{ secrets.POITE_KEYSTORE_BASE64 }}
+        run: |
+          for name in POITE_KEYSTORE_BASE64 POITE_KEYSTORE_PASSWORD POITE_KEY_ALIAS POITE_KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::$name is not configured. See docs/releasing.md."
+              exit 1
+            fi
+          done
+
+      - name: Checkout release tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+
+      - name: Restore upload keystore
+        env:
+          POITE_KEYSTORE_BASE64: ${{ secrets.POITE_KEYSTORE_BASE64 }}
+        run: |
+          umask 077
+          export POITE_KEYSTORE_PATH="$RUNNER_TEMP/poite-release.jks"
+          base64 --decode <<< "$POITE_KEYSTORE_BASE64" > "$POITE_KEYSTORE_PATH"
+          echo "POITE_KEYSTORE_PATH=$POITE_KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+      - name: Test and build signed release
+        run: ./gradlew :shared:testDebugUnitTest :androidApp:assembleRelease :androidApp:bundleRelease --stacktrace
+
+      - name: Verify and package artifacts
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/release-artifacts"
+          mkdir -p "$output"
+          apk="androidApp/build/outputs/apk/release/androidApp-release.apk"
+          aab="androidApp/build/outputs/bundle/release/androidApp-release.aab"
+          test -s "$apk"
+          test -s "$aab"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$apksigner"
+          "$apksigner" verify --print-certs "$apk"
+          IFS=. read -r major minor patch <<< "$RELEASE_VERSION"
+          version_code=$((major * 1000000 + minor * 1000 + patch))
+          build_tools="$(dirname "$apksigner")"
+          "$build_tools/aapt2" dump badging "$apk" | grep -F \
+            "package: name='net.coolshell.poite' versionCode='$version_code' versionName='$RELEASE_VERSION'"
+          cp "$apk" "$output/poite-$RELEASE_VERSION.apk"
+          cp "$aab" "$output/poite-$RELEASE_VERSION.aab"
+          (cd "$output" && sha256sum poite-*.apk poite-*.aab > checksums.txt)
+
+      - name: Upload assets to draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/release-artifacts/"*
+
+      - name: Publish verified GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release edit "$RELEASE_TAG" --draft=false

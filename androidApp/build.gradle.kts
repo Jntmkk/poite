@@ -19,12 +19,26 @@ android {
         applicationId = "net.coolshell.poite"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        // Minor and patch must stay in 0..999 to keep versionCode monotonically increasing.
+        versionCode = 1 * 1_000_000 + // x-release-please-major
+            0 * 1_000 + // x-release-please-minor
+            0 // x-release-please-patch
+        versionName = "1.0.0" // x-release-please-version
     }
     buildTypes {
         release {
             isMinifyEnabled = false
+
+            val keystorePath = System.getenv("POITE_KEYSTORE_PATH")
+            if (!keystorePath.isNullOrBlank()) {
+                val releaseSigning = signingConfigs.create("release") {
+                    storeFile = file(keystorePath)
+                    storePassword = System.getenv("POITE_KEYSTORE_PASSWORD")
+                    keyAlias = System.getenv("POITE_KEY_ALIAS")
+                    keyPassword = System.getenv("POITE_KEY_PASSWORD")
+                }
+                signingConfig = releaseSigning
+            }
         }
     }
     compileOptions {
