@@ -21,9 +21,9 @@ android {
         targetSdk = 36
         // Minor and patch must stay in 0..999 to keep versionCode monotonically increasing.
         versionCode = 1 * 1_000_000 + // x-release-please-major
-            0 * 1_000 + // x-release-please-minor
+            1 * 1_000 + // x-release-please-minor
             0 // x-release-please-patch
-        versionName = "1.0.0" // x-release-please-version
+        versionName = "1.1.0" // x-release-please-version
     }
     buildTypes {
         release {
